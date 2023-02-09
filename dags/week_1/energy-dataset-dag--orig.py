@@ -16,11 +16,10 @@ from airflow.decorators import dag, task # DAG and task decorators for interfaci
     # run will be for the next 30 mins, per the schedule_interval
     catchup=False,
     default_args={
-        "owner": "wexler", # This defines the value of the "owner" column in the DAG view of the Airflow UI
         "retries": 2, # If a task fails, it will retry 2 times.
     },
     tags=['example']) # If set, this tag is shown in the DAG view of the Airflow UI
-def energy_dataset_dag():
+def energy_dataset_dag_orig():
     """
     ### Basic ETL Dag
     This is a simple ETL data pipeline example that demonstrates the use of
@@ -39,24 +38,6 @@ def energy_dataset_dag():
         """
         from zipfile import ZipFile
         # TODO Unzip files into pandas dataframes
-        zip = ZipFile("/Users/michaelwexler/Documents/Code/corise-airflow/dags/data/energy-consumption-generation-prices-and-weather.zip")
-        frames=[]
-
-        # open zipped dataset
-        with zip as z:
-            for name in z.namelist():
-                # open the csv file in the dataset
-                with z.open(name) as f:
-                    # read the dataset
-                    dataset = pd.read_csv(f)
-                    # display dataset
-                    frames.append(dataset)
-        
-        return frames
-
-    @task
-    def transform(unzip_result: List[pd.DataFrame]) -> List[pd.DataFrame]:
-        return unzip_result
 
 
     @task
@@ -68,8 +49,6 @@ def energy_dataset_dag():
         """
 
         from airflow.providers.google.cloud.hooks.gcs import GCSHook
-        import tempfile
-        import os
 
         data_types = ['generation', 'weather']
 
@@ -81,26 +60,9 @@ def energy_dataset_dag():
         
         client = GCSHook()     \
         # TODO Add GCS upload code
-        c=0
-        bucket_name='corise-airflow-wexler'
-        with tempfile.TemporaryDirectory() as tmpdir:
-          print(f"directory {tmpdir.name} created")
-          for obj in data_types:
-            obj_name=obj+'.parquet'
-            df=unzip_result[c]   # This was the passed in list
-            print(df.info()) # prints schema
-            local_name=os.path.join(tmpdir, obj_name)
-            df.to_parquet(local_name)
-            client.upload(bucket_name, obj_name, local_name)
-            c=c+1
-        
 
-
-        
 
     # TODO Add task linking logic here
-    energy_raw_data = extract()
-    energy_transformed_data = transform(energy_raw_data)
-    load(energy_transformed_data)
 
-energy_dataset_dag = energy_dataset_dag()
+
+energy_dataset_dag = energy_dataset_dag_orig()
