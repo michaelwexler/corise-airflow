@@ -16,6 +16,7 @@ from airflow.decorators import dag, task # DAG and task decorators for interfaci
     # run will be for the next 30 mins, per the schedule_interval
     catchup=False,
     default_args={
+        "owner": "community", # This defines the value of the "owner" column in the DAG view of the Airflow UI
         "retries": 2, # If a task fails, it will retry 2 times.
     },
     tags=['example']) # If set, this tag is shown in the DAG view of the Airflow UI
