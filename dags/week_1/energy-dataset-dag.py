@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List
 
 import pandas as pd
+import os
 from airflow.decorators import dag, task # DAG and task decorators for interfacing with the TaskFlow API
 
 @dag(
@@ -39,8 +40,14 @@ def energy_dataset_dag():
         """
         from zipfile import ZipFile
         # TODO Unzip files into pandas dataframes
-        zip = ZipFile("/Users/michaelwexler/Documents/Code/corise-airflow/dags/data/energy-consumption-generation-prices-and-weather.zip")
+        # zip = ZipFile("/Users/michaelwexler/Documents/Code/corise-airflow/dags/data/energy-consumption-generation-prices-and-weather.zip")
+        zip = ZipFile("/usr/local/airflow/dags/data/energy-consumption-generation-prices-and-weather.zip")
         frames=[]
+
+        # print (os.getcwd())
+        # files = [f for f in os.listdir('.') if os.path.isfile(f)]
+        # for f in files:
+        #     print(f)
 
         # open zipped dataset
         with zip as z:
@@ -84,7 +91,7 @@ def energy_dataset_dag():
         c=0
         bucket_name='corise-airflow-wexler'
         with tempfile.TemporaryDirectory() as tmpdir:
-          print(f"directory {tmpdir.name} created")
+          print(f"directory {tmpdir} created")
           for obj in data_types:
             obj_name=obj+'.parquet'
             df=unzip_result[c]   # This was the passed in list
