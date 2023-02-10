@@ -44,7 +44,7 @@ def energy_dataset_dag():
         # TODO Use environment variable AIRFLOW_HOME, which in our setup defaults to usr/local/airflow 
         #       os.getenv('AIRFLOW_HOME')
         # zip = ZipFile("/usr/local/airflow/dags/data/energy-consumption-generation-prices-and-weather.zip")
-        zip = ZipFile(f"{os.env('AIRFLOW_HOME')}/data/energy-consumption-generation-prices-and-weather.zip")
+        zip = ZipFile(f"{os.getenv('AIRFLOW_HOME')}/dags/data/energy-consumption-generation-prices-and-weather.zip")
         frames=[]
 
         # print (os.getcwd())
@@ -114,3 +114,12 @@ def energy_dataset_dag():
     load(energy_transformed_data)
 
 energy_dataset_dag = energy_dataset_dag()
+
+# Test in shell: 
+# pip install pandas gcsfs pyarrow fastparquet
+# then in python: 
+# import pandas as pd
+# df = pd.read_parquet('gs://corise-airflow-wexler/generation.parquet')
+# df.head()
+# df.info()
+
