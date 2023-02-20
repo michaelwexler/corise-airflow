@@ -8,20 +8,25 @@ import xgboost as xgb
 from airflow.operators.empty import EmptyOperator
 from airflow.models.dag import DAG
 from airflow.decorators import task, task_group
+from airflow.providers.google.cloud.hooks.gcs import GCSHook
 
 TRAINING_DATA_PATH = 'week-2/price_prediction_training_data.csv'
-# DATASET_NORM_WRITE_BUCKET = '' # Modify here
+DATASET_NORM_WRITE_BUCKET = 'corise-airflow-wexler' # Modify here
 
-VAL_END_INDEX = 31056
+VAL_END_INDEX = 31056   # Why is this hardcoded?
 
+#################################
+# Data Prep
+################################
 
+# Utility function for data prep
 def df_convert_dtypes(df, convert_from, convert_to):
     cols = df.select_dtypes(include=[convert_from]).columns
     for col in cols:
         df[col] = df[col].values.astype(convert_to)
     return df
 
-
+# Load the file 
 @task()
 def extract() -> Dict[str, pd.DataFrame]:
     """
@@ -46,8 +51,7 @@ def post_process_energy_df(df: pd.DataFrame) -> pd.DataFrame:
     Prepare energy dataframe for merge with weather data
     """
 
-
-    # Drop columns that are all 0s\
+    # Drop columns that are all 0s\ based on previous exploration
     import pandas as pd
     df = df.drop(['generation fossil coal-derived gas','generation fossil oil shale', 
                   'generation fossil peat', 'generation geothermal', 
@@ -55,14 +59,15 @@ def post_process_energy_df(df: pd.DataFrame) -> pd.DataFrame:
                   'generation wind offshore', 'forecast wind offshore eday ahead',
                   'total load forecast', 'forecast solar day ahead',
                   'forecast wind onshore day ahead'], 
-                  axis=1)
+                  axis=1)  # 1=columns!
 
-    # Extract timestamp
+    # Extract timestamp (convert to useful, make it the index)
     df['time'] = pd.to_datetime(df['time'], utc=True, infer_datetime_format=True)
     df = df.set_index('time')
 
     # Interpolate the null price values
-    df.interpolate(method='linear', limit_direction='forward', inplace=True, axis=0)
+    df.interpolate(method='linear', limit_direction='forward', inplace=True, axis=0)  # 0=rows
+
     return df
 
 
@@ -83,7 +88,7 @@ def post_process_weather_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(['dt_iso'], axis=1)
     df = df.set_index('time')
 
-    # Reset index and drop records for the same city and time
+    # Reset index and drop records for the same city and time, then put time back as index
     df = df.reset_index().drop_duplicates(subset=['time', 'city_name'],
                                                           keep='first').set_index('time')
 
@@ -91,13 +96,14 @@ def post_process_weather_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(['weather_main', 'weather_id', 
                                   'weather_description', 'weather_icon'], axis=1)
 
-    # Filter out pressure and wind speed outliers
+    # Filter out pressure and wind speed outliers by replacing with nan (NULLs)
     df.loc[df.pressure > 1051, 'pressure'] = np.nan
     df.loc[df.pressure < 931, 'pressure'] = np.nan
     df.loc[df.wind_speed > 50, 'wind_speed'] = np.nan
 
-    # Interpolate for filtered values
+    # Interpolate for filtered values to replace the nulls
     df.interpolate(method='linear', limit_direction='forward', inplace=True, axis=0)
+    
     return df
 
 
@@ -107,22 +113,21 @@ def join_dataframes_and_post_process(df_energy: pd.DataFrame, df_weather: pd.Dat
     Join dataframes and drop city-specific features
     """
 
-
     df_final = df_energy
-    df_1, df_2, df_3, df_4, df_5 = [x for _, x in df_weather.groupby('city_name')]
+    df_1, df_2, df_3, df_4, df_5 = [x for _, x in df_weather.groupby('city_name')]  # groupby here acts as filter
     dfs = [df_1, df_2, df_3, df_4, df_5]
 
-    for df in dfs:
+    for df in dfs:                                             # This adds the _cityname to each column as part of transpose
         city = df['city_name'].unique()
         city_str = str(city).replace("'", "").replace('[', '').replace(']', '').replace(' ', '')
         df = df.add_suffix('_{}'.format(city_str))
         df_final = df_final.merge(df, on=['time'], how='outer')
-        df_final = df_final.drop('city_name_{}'.format(city_str), axis=1)
+        df_final = df_final.drop('city_name_{}'.format(city_str), axis=1)  # maybe groupby adds city_name_barcelona, etc?
 
 
-    cities = ['Barcelona', 'Bilbao', 'Madrid', 'Seville', 'Valencia']
+    cities = ['Barcelona', 'Bilbao', 'Madrid', 'Seville', 'Valencia']   
     for city in cities:
-        df_final = df_final.drop(['rain_3h_{}'.format(city)], axis=1)
+        df_final = df_final.drop(['rain_3h_{}'.format(city)], axis=1)   # after transpose, manually drop these 5 columns
 
     return df_final
 
@@ -133,7 +138,7 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Extract helpful temporal, geographic, and highly correlated energy features
     """
-    # Calculate the weight of every city
+    # Calculate the weight of every city  ?? based on population
     total_pop = 6155116 + 5179243 + 1645342 + 1305342 + 987000
     weight_Madrid = 6155116 / total_pop
     weight_Barcelona = 5179243 / total_pop
@@ -146,51 +151,51 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
                       'Seville': weight_Seville,
                       'Bilbao': weight_Bilbao}
 
-    for i in range(len(df)):
+    for i in range(len(df)):          # row by row
         # Generate 'hour', 'weekday' and 'month' features
-        position = df.index[i]
-        hour = position.hour
-        weekday = position.weekday()
-        month = position.month
+        position = df.index[i]        # which is basically the timestamp
+        hour = position.hour          # datetime: this is just an extractor, not a function. Grr. 1? range(24)
+        weekday = position.weekday()  # datetime function, 0=Monday
+        month = position.month        #     "     1-12
         df.loc[position, 'hour'] = hour
         df.loc[position, 'weekday'] = weekday
         df.loc[position, 'month'] = month
 
-        # Generate 'business hour' feature
-        if (hour > 8 and hour < 14) or (hour > 16 and hour < 21):
+        # Generate 'business hour' feature: not a flag but a 3 group categorical 
+        if (hour > 8 and hour < 14) or (hour > 16 and hour < 21): # leave out 2p-4p for siesta!
             df.loc[position, 'business hour'] = 2
         elif (hour >= 14 and hour <= 16):
-            df.loc[position, 'business hour'] = 1
+            df.loc[position, 'business hour'] = 1                 # Why does Siesta get a 1?  
         else:
             df.loc[position, 'business hour'] = 0
-        print("business hours generated")
+        #print("business hours generated")
 
-        # Generate 'weekend' feature
-
+        # Generate 'weekend' feature  # Sunday is a 2, Sat is a 1, other usual "weekdays" are 0
         if (weekday == 6):
             df.loc[position, 'weekday'] = 2
         elif (weekday == 5):
             df.loc[position, 'weekday'] = 1
         else:
             df.loc[position, 'weekday'] = 0
-        print("weekdays generated")
+        #print("weekdays generated")
 
-        # Generate 'temp_range' for each city
+        # Generate 'temp_range' for each city  (Per day?  are these columns already present?)
         temp_weighted = 0
         for city in cities_weights.keys():
             temp_max = df.loc[position, 'temp_max_{}'.format(city)]
             temp_min = df.loc[position, 'temp_min_{}'.format(city)]
             df.loc[position, 'temp_range_{}'.format(city)] = abs(temp_max - temp_min)
 
-            # Generated city-weighted temperature 
+            # Generated city-weighted temperature   (  Why are we weighting the temp by pop? And what is this temp? Avg?)
             temp = df.loc[position, 'temp_{}'.format(city)]
             temp_weighted += temp * cities_weights.get('{}'.format(city))
         df.loc[position, 'temp_weighted'] = temp_weighted
 
-        print("city temp features generated")
+        if i % 1000 == 0: print(f"city temp features generated for row {i}")
 
 
     df['generation coal all'] = df['generation fossil hard coal'] + df['generation fossil brown coal/lignite']
+
     return df
 
 
@@ -206,25 +211,31 @@ def prepare_model_inputs(df_final: pd.DataFrame):
     from sklearn.decomposition import PCA
     from airflow.providers.google.cloud.hooks.gcs import GCSHook
 
-    X = df_final[df_final.columns.drop('price actual')].values
+    X = df_final[df_final.columns.drop('price actual')].values   # Gonna be predicting the price, df_final started at (35064, 78)
     y = df_final['price actual'].values
-    y = y.reshape(-1, 1)
+    y = y.reshape(-1, 1)                            # -1 means do whatever you need to to make a 1D numpy array
+    
     scaler_X = MinMaxScaler(feature_range=(0, 1))
     scaler_y = MinMaxScaler(feature_range=(0, 1))
-    scaler_X.fit(X[:VAL_END_INDEX])
+    scaler_X.fit(X[:VAL_END_INDEX])                # Why is this a constant?  Winds up useful in indices subsamples for model build-and-test  
     scaler_y.fit(y[:VAL_END_INDEX])
-    X_norm = scaler_X.transform(X)
+    X_norm = scaler_X.transform(X)                 # Normalized is minmax, not standardized.  Sigh.  
     y_norm = scaler_y.transform(y)
 
-    pca = PCA(n_components=0.80)
+    pca = PCA(n_components=0.80)                    # n_components here is explained variance not specific number
     pca.fit(X_norm[:VAL_END_INDEX])
     X_pca = pca.transform(X_norm)
-    dataset_norm = np.concatenate((X_pca, y_norm), axis=1)
-    df_norm = pd.DataFrame(dataset_norm)
+    dataset_norm = np.concatenate((X_pca, y_norm), axis=1)  # This creates an array of numpy columns.  So, 17 (0-16) cols, last is target
+    df_norm = pd.DataFrame(dataset_norm)              # are we keeping the transformed?  Or the originals?  we throw away df_norm
+    
     client = GCSHook().get_conn()
-    # 
     write_bucket = client.bucket(DATASET_NORM_WRITE_BUCKET)
-    write_bucket.blob(TRAINING_DATA_PATH).upload_from_string(pd.DataFrame(dataset_norm).to_csv())
+    write_bucket.blob(TRAINING_DATA_PATH).upload_from_string(pd.DataFrame(dataset_norm).to_csv())   # filename in const Training_Data_Path  Why from string?
+
+
+######################################################################
+# Model build
+######################################################################
 
 
 @task
@@ -254,7 +265,7 @@ def multivariate_data(dataset,
     Produce subset of dataset indexed by data_indices, with a window size of history_size hours
     """
 
-    target = dataset[:, -1]
+    target = dataset[:, -1]    # grabs last column as target. 
     data = []
     labels = []
     for i in data_indices:
@@ -268,8 +279,6 @@ def multivariate_data(dataset,
         else:
             labels.append(target[i : i + target_size])
     return np.array(data), np.array(labels)
-
-
 
 
 
@@ -306,6 +315,20 @@ def produce_indices() -> List[Tuple[np.ndarray, np.ndarray]]:
     """
     
     # TODO Modify here
+    top_val=35000 # hard coded for safety, this is silly; we should pass in parameters of the dataset
+    train_indices = []
+    val_indices = []
+
+    for rng in [0.7, 0.8, 0.9]:    # taking various % of the indices
+        indices = np.random.permutation(range(0,top_val))  # randomize order each time to add some variety
+        tr_end = int(min(rng*top_val, VAL_END_INDEX))      # Don't allow training to exceed VAL_END_INDEX
+        train_indices.append(np.array(indices[:tr_end]))   # Slicing the array, python does x:y-1 in slices.  
+        val_indices.append((np.array(indices[tr_end:])))   # prob don't need to force these again to numpy arrays but safe... 
+        
+    return list(zip(train_indices, val_indices))        
+    
+    
+
 
 
 
@@ -316,7 +339,7 @@ def format_data_and_train_model(dataset_norm: np.ndarray,
     Extract training and validation sets and labels, and train a model with a given
     set of training and validation indices
     """
-    past_history = 24
+    past_history = 24       # 24 hours window
     future_target = 0
     train_indices, val_indices = indices
     print(f"train_indices is {train_indices}, val_indices is {val_indices}")
@@ -332,12 +355,33 @@ def format_data_and_train_model(dataset_norm: np.ndarray,
 @task
 def select_best_model(models: List[xgb.Booster]):
     """
-    Select model that generalizes the best against the validation set, and 
+    Select model that generalizes the best against it's validation set, and 
     write this to GCS. The best_score is an attribute of the model, and corresponds to
     the highest eval score yielded during training.
     """
 
-   # TODO Modify here
+    # TODO Modify here
+    best_model_yet = None
+    best_score_yet = -1        # impossible value, guaranteed to be lower than 0
+    
+    for model in models:       # simple walk to find highest
+        score=model.best_score
+        if score > best_score_yet:
+            best_score_yet = score
+            best_model_yet = model
+    
+    best_model_yet.save_model("best_model.json")   # saves in local, how annoying
+    client = GCSHook() # assumes default connection
+    client.upload(
+        bucket_name=DATASET_NORM_WRITE_BUCKET,
+        object_name="best_model.json",
+        filename="best_model.json"
+        )
+    
+    # Note: We don't really learn which version of our indices drove the best model.
+
+
+
 
 
 @task_group
@@ -350,14 +394,15 @@ def join_data_and_add_features():
       4. Adding features to the joined dataframe
       5. Producing a dimension-reduced numpy array containing the most
          significant features, and save it to GCS
+     ?? what format?  
     """
-    output = extract()
+    output = extract()   # Reads the zipped data, returns a dict of dataframes
     df_energy, df_weather =  output["df_energy"], output["df_weather"]
     df_energy = post_process_energy_df(df_energy)
     df_weather = post_process_weather_df(df_weather)
     df_final = join_dataframes_and_post_process(df_energy, df_weather)
     df_final = add_features(df_final)
-    prepare_task = prepare_model_inputs(df_final)
+    prepare_task = prepare_model_inputs(df_final)    # By this point, have a 17 col numpy array, written to GCS
 
 
 @task_group
@@ -373,12 +418,20 @@ def train_and_select_best_model():
     Using different train/val splits, train multiple models and select the one with the best evaluation score.
     """
 
-    past_history = 24
+    past_history = 24                           # 24 hours window
     future_target = 0
     dataset_norm = read_dataset_norm()
 
     # TODO: Modify here to select best model and save it to GCS, using above methods including
     # format_data_and_train_model, produce_indices, and select_best_model
+
+    models = format_data_and_train_model.partial(dataset_norm=dataset_norm).expand(indices=produce_indices())
+    select_best_model(models)
+
+    # The chaining hides some of the complexity of what's going on.  
+    # .partial() has anything constant across calls; .expand() is what differs.  (.partital() is also in functools)
+    # Airflow appears to return a list from the expand()
+
 
 
 
@@ -386,6 +439,11 @@ with DAG("energy_price_prediction",
     schedule_interval=None,
     start_date=datetime(2021, 1, 1),
     tags=['model_training'],
+    catchup=False,
+    default_args={
+        "owner": "wexler", # This defines the value of the "owner" column in the DAG view of the Airflow UI
+        "retries": 2, # If a task fails, it will retry 2 times.
+    },
     render_template_as_native_obj=True,
     concurrency=5
     ) as dag:
