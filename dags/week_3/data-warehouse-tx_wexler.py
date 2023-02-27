@@ -159,7 +159,7 @@ def data_warehouse_transform_dag_wexler():
         ## Why is the produce_select_statement not in the function?  
 
 
-    @task
+    @task_group
     def produce_joined_view():
         from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyTableOperator
         # TODO Modify here to produce a view that joins the two normalized views on time
