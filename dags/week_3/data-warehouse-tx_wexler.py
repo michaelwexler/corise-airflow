@@ -69,7 +69,7 @@ def data_warehouse_transform_dag_wexler():
             bucket.blob(f"week-3/{DATA_TYPES[index]}.parquet").upload_from_string(df.to_parquet(), "text/parquet")  # using the names from the imported "config.py" file; parquet as string.
             print(df.dtypes)
 
-### Note, had to change this to a dask group, but unclear why!
+
     @task_group
     def create_bigquery_dataset():
         from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyDatasetOperator
@@ -172,7 +172,7 @@ def data_warehouse_transform_dag_wexler():
         view_sql_gen = produce_select_statement(timestamp_column = normalized_columns["generation"]["time"], columns=normalized_columns["generation"]["columns"])
         view_sql_gen = view_sql_gen + f" FROM {BQ_DATASET_NAME}.generation;"
 
-        BigQueryCreateEmptyTableOperator(task_id="create_table_gen",
+        BigQueryCreateEmptyTableOperator(task_id="create_view_gen",
                                          dataset_id=BQ_DATASET_NAME,
                                          table_id="gen_ts_view",
                                          view={
@@ -182,12 +182,12 @@ def data_warehouse_transform_dag_wexler():
                                          )
 
         #Now build the selects for the view for weather.
-        view_sql_gen = produce_select_statement(timestamp_column = normalized_columns["generation"]["time"], columns=normalized_columns["generation"]["columns"])
-        view_sql_gen = view_sql_gen + f" FROM {BQ_DATASET_NAME}.generation;"
+        view_sql_gen = produce_select_statement(timestamp_column = normalized_columns["weather"]["time"], columns=normalized_columns["weather"]["columns"])
+        view_sql_gen = view_sql_gen + f" FROM {BQ_DATASET_NAME}.weather;"
 
-        BigQueryCreateEmptyTableOperator(task_id="create_table_gen",
+        BigQueryCreateEmptyTableOperator(task_id="create_view_wea",
                                          dataset_id=BQ_DATASET_NAME,
-                                         table_id="gen_ts_view",
+                                         table_id="wea_ts_view",
                                          view={
                                                 "query": view_sql_gen,
                                                 "useLegacySql":False,
@@ -202,7 +202,22 @@ def data_warehouse_transform_dag_wexler():
     def produce_joined_view():
         from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyTableOperator
         # TODO Modify here to produce a view that joins the two normalized views on time
-        EmptyOperator(task_id='placeholder')
+        # EmptyOperator(task_id='placeholder')
+   
+        joined_view_sql = """
+        select w.*, g.* 
+        from corise_test.wea_ts_view w join corise_test.gen_ts_view g on w.dt_iso=g.time
+        """
+
+        BigQueryCreateEmptyTableOperator(task_id="create_joined_view_wea_gen",
+                                         dataset_id=BQ_DATASET_NAME,
+                                         table_id="wea_gen_view",
+                                         view={
+                                                "query": joined_view_sql,
+                                                "useLegacySql":False,
+                                            }
+                                         )
+
 
 
     unzip_task = extract()
