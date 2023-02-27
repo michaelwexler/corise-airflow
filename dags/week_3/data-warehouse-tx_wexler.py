@@ -10,7 +10,7 @@ from common.week_3.config import DATA_TYPES, normalized_columns
 
 PROJECT_ID = 'airflow-week1-377216'
 DESTINATION_BUCKET = 'corise-airflow-wexler'
-BQ_DATASET_NAME = 'corise-test'
+BQ_DATASET_NAME = 'corise_test'
 
 
 @dag(
@@ -22,7 +22,7 @@ BQ_DATASET_NAME = 'corise-test'
         "retries": 2, # If a task fails, it will retry 2 times.
     }
     ) 
-def data_warehouse_transform_dag():
+def data_warehouse_transform_dag_wexler():
     """
     ### Data Warehouse Transform DAG
     This DAG performs four operations:
@@ -69,7 +69,8 @@ def data_warehouse_transform_dag():
             bucket.blob(f"week-3/{DATA_TYPES[index]}.parquet").upload_from_string(df.to_parquet(), "text/parquet")  # using the names from the imported "config.py" file; parquet as string.
             print(df.dtypes)
 
-    @task
+### Note, had to change this to a dask group, but unclear why!
+    @task_group
     def create_bigquery_dataset():
         from airflow.providers.google.cloud.operators.bigquery import BigQueryCreateEmptyDatasetOperator
         # EmptyOperator(task_id='placeholder')
@@ -80,7 +81,10 @@ def data_warehouse_transform_dag():
         # Returns what?  Hardcoded dataset name at top, so nothing to return?
         # do we need gcp_conn_id=GCS_CONN_ID
         # https://registry.astronomer.io/providers/google/modules/bigquerycreateemptydatasetoperator 
-        BigQueryCreateEmptyDatasetOperator(task_id="create-dataset", exists_ok=False, dataset_id=BQ_DATASET_NAME, project_id=PROJECT_ID)
+
+        print("before")
+        BigQueryCreateEmptyDatasetOperator(task_id="create-dataset", exists_ok=True, dataset_id=BQ_DATASET_NAME, project_id=PROJECT_ID)
+        print("after")
 
 
 
@@ -95,7 +99,46 @@ def data_warehouse_transform_dag():
         # When using the BigQueryCreateExternalTableOperator, it's suggested you use the table_resource
         # field to specify DDL configuration parameters. If you don't, then you will see an error
         # related to the built table_resource specifying csvOptions even though the desired format is 
-        # PARQUET.
+        # PARQUET.  
+
+        ### Note that this is __create or replace__: no errors about existing, just overwrote existing defn!!! 
+        
+        BigQueryCreateExternalTableOperator(task_id="create_external_tables_1",
+                    bucket=DESTINATION_BUCKET,
+                    #source_objects="corise-airflow-wexler/week-3/generation.parquet",
+                    #destination_project_dataset_table=f"{BQ_DATASET_NAME}.generation", 
+                    #source_format="PARQUET", 
+                    table_resource={
+                        "tableReference": {
+                            "projectId": PROJECT_ID,
+                            "datasetId": BQ_DATASET_NAME,
+                            "tableId": "generation"
+                            },
+                        "externalDataConfiguration": {
+                            "sourceFormat": "PARQUET",
+                            "sourceUris":f"gs://corise-airflow-wexler/week-3/generation.parquet",
+                            }
+                        }
+                    )
+        
+        BigQueryCreateExternalTableOperator(task_id="create_external_tables_2",
+                    bucket=DESTINATION_BUCKET,
+                    #source_objects="corise-airflow-wexler/week-3/generation.parquet",
+                    #destination_project_dataset_table=f"{BQ_DATASET_NAME}.weather", 
+                    #source_format="PARQUET", 
+                    table_resource={
+                        "tableReference": {
+                            "projectId": PROJECT_ID,
+                            "datasetId": BQ_DATASET_NAME,
+                            "tableId": "weather"
+                            },
+                        "externalDataConfiguration": {
+                            "sourceFormat": "PARQUET",
+                            "sourceUris":f"gs://corise-airflow-wexler/week-3/weather.parquet",
+                            }
+                        }
+                    )
+        
 
 
     def produce_select_statement(timestamp_column: str, columns: List[str]) -> str:
@@ -112,6 +155,8 @@ def data_warehouse_transform_dag():
         # accepts the timestamp column, and essential columns for each of the datatypes and build a 
         # select statement ptogrammatically, which can then be passed to the Airflow Operators.
         EmptyOperator(task_id='placeholder')
+
+        ## Why is the produce_select_statement not in the function?  
 
 
     @task
@@ -133,7 +178,7 @@ def data_warehouse_transform_dag():
     normal_view_task >> joined_view_task
 
 # https://corise.com/course/effective-data-orchestration-with-airflow/v2/module/week-3-project-instructions 
-data_warehouse_transform_dag = data_warehouse_transform_dag()
+data_warehouse_transform_dag = data_warehouse_transform_dag_wexler()
 
 """
 Ingest data to GCS.
@@ -146,3 +191,59 @@ Produce normalized views on top of the external tables capturing specific column
 
 Produce views representing joins on the normalized views.
 """ 
+
+
+"""
+Generation format: 
+
+time                                            object
+generation_biomass                             float64
+generation_fossil_brown_coal_lignite           float64
+generation_fossil_coal_derived_gas             float64
+generation_fossil_gas                          float64
+generation_fossil_hard_coal                    float64
+generation_fossil_oil                          float64
+generation_fossil_oil_shale                    float64
+generation_fossil_peat                         float64
+generation_geothermal                          float64
+generation_hydro_pumped_storage_aggregated     float64
+generation_hydro_pumped_storage_consumption    float64
+generation_hydro_run_of_river_and_poundage     float64
+generation_hydro_water_reservoir               float64
+generation_marine                              float64
+generation_nuclear                             float64
+generation_other                               float64
+generation_other_renewable                     float64
+generation_solar                               float64
+generation_waste                               float64
+generation_wind_offshore                       float64
+generation_wind_onshore                        float64
+forecast_solar_day_ahead                       float64
+forecast_wind_offshore_eday_ahead              float64
+forecast_wind_onshore_day_ahead                float64
+total_load_forecast                            float64
+total_load_actual                              float64
+price_day_ahead                                float64
+price_actual                                   float64
+
+Weather format
+dt_iso                  object
+city_name               object
+temp                   float64
+temp_min               float64
+temp_max               float64
+pressure                 int64
+humidity                 int64
+wind_speed               int64
+wind_deg                 int64
+rain_1h                float64
+rain_3h                float64
+snow_3h                float64
+clouds_all               int64
+weather_id               int64
+weather_main            object
+weather_description     object
+weather_icon            object
+dtype: object
+
+"""
