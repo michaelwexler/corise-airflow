@@ -101,7 +101,8 @@ def data_warehouse_transform_dag_wexler():
         # related to the built table_resource specifying csvOptions even though the desired format is 
         # PARQUET.  
 
-        ### Note that this is __create or replace__: no errors about existing, just overwrote existing defn!!! 
+        ### Note that this is __create or replace__: no errors about existing, just overwrote existing defn!!!  OUCHHHHH!
+        ###  TODO: This should be a list of ["generation", "weather"] with a loop, or even just normalized_columns.keys()
         
         BigQueryCreateExternalTableOperator(task_id="create_external_tables_1",
                     bucket=DESTINATION_BUCKET,
@@ -144,7 +145,15 @@ def data_warehouse_transform_dag_wexler():
     def produce_select_statement(timestamp_column: str, columns: List[str]) -> str:
         # TODO Modify here to produce a select statement by casting 'timestamp_column' to 
         # TIMESTAMP type, and selecting all of the columns in 'columns'
-        pass
+        # pass
+        
+        first_part=f"SELECT CAST({timestamp_column} AS TIMESTAMP) as {timestamp_column}, "
+        second_part =", ".join(columns)
+        return  first_part + second_part
+
+        
+        
+
 
     @task_group
     def produce_normalized_views():
@@ -154,9 +163,39 @@ def data_warehouse_transform_dag_wexler():
         # columns in each datasource from string to time. The utility function 'produce_select_statement'
         # accepts the timestamp column, and essential columns for each of the datatypes and build a 
         # select statement ptogrammatically, which can then be passed to the Airflow Operators.
-        EmptyOperator(task_id='placeholder')
+        # EmptyOperator(task_id='placeholder')
 
-        ## Why is the produce_select_statement not in the function?  
+        ### Why is the produce_select_statement not in this function?  
+        ### TODO: This should be a list of ["generation", "weather"] with a loop, or even just normalized_columns.keys()
+        
+        #first build the selects for the view for generation.
+        view_sql_gen = produce_select_statement(timestamp_column = normalized_columns["generation"]["time"], columns=normalized_columns["generation"]["columns"])
+        view_sql_gen = view_sql_gen + f" FROM {BQ_DATASET_NAME}.generation;"
+
+        BigQueryCreateEmptyTableOperator(task_id="create_table_gen",
+                                         dataset_id=BQ_DATASET_NAME,
+                                         table_id="gen_ts_view",
+                                         view={
+                                                "query": view_sql_gen,
+                                                "useLegacySql":False,
+                                            }
+                                         )
+
+        #Now build the selects for the view for weather.
+        view_sql_gen = produce_select_statement(timestamp_column = normalized_columns["generation"]["time"], columns=normalized_columns["generation"]["columns"])
+        view_sql_gen = view_sql_gen + f" FROM {BQ_DATASET_NAME}.generation;"
+
+        BigQueryCreateEmptyTableOperator(task_id="create_table_gen",
+                                         dataset_id=BQ_DATASET_NAME,
+                                         table_id="gen_ts_view",
+                                         view={
+                                                "query": view_sql_gen,
+                                                "useLegacySql":False,
+                                            }
+                                         )
+
+
+
 
 
     @task_group
@@ -194,6 +233,11 @@ Produce views representing joins on the normalized views.
 
 
 """
+normalized_columns.keys() //['generation', 'weather']
+normalized_columns["generation"].keys() // dict_keys(['time', 'columns'])
+normalilized_columns["generations"]["time"] returns time, the intended type
+normalilized_columns["generations"]["columns"] returns a list of columns
+
 Generation format: 
 
 time                                            object
