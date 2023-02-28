@@ -167,6 +167,15 @@ def data_warehouse_transform_dag_wexler():
 
         ### Why is the produce_select_statement not in this function?  
         ### TODO: This should be a list of ["generation", "weather"] with a loop, or even just normalized_columns.keys()
+
+        """
+        From Scott:
+        Looks good, Michael! For the task groups that involved creating multiple Operators -- you can use a loop to create a list of operators:
+
+        tasks = [] for i in DATA_TYPES: < define a task_resource template > tasks.append( < an operator that calls task_resource > )
+
+        and then @task_group can pick up on tasks as it's a list of Operators. :)
+        """
         
         #first build the selects for the view for generation.
         view_sql_gen = produce_select_statement(timestamp_column = normalized_columns["generation"]["time"], columns=normalized_columns["generation"]["columns"])
