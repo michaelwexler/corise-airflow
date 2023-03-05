@@ -10,6 +10,7 @@ from astro.table import Metadata, Table
 
 BQ_DATASET_NAME = "timeseries_energy"
 
+# https://corise.com/course/effective-data-orchestration-with-airflow/v2/module/week-4-project-instructions
 
 time_columns = {
     "generation": "time",
@@ -17,8 +18,8 @@ time_columns = {
 }
 
 filepaths = {
-    # "generation": fill in location of data from week 3
-    # "weather": " fill in location of data from week 3
+     "generation": "gs://corise-airflow-wexler/week-3/generation.parquet",
+     "weather"  : "gs://corise-airflow-wexler/week-3/weather.parquet"
 }
 
 
@@ -57,9 +58,13 @@ def join_tables(generation_table: Table, weather_table: Table):  # skipcq: PYL-W
 
               
 with DAG(
-    dag_id="astro_sdk_transform_dag",
+    dag_id="astro_sdk_transform_dag_wexler",
     schedule_interval=None,
     start_date=timezone.datetime(2022, 1, 1),
+    default_args={
+        "owner": "wexler", # This defines the value of the "owner" column in the DAG view of the Airflow UI
+        "retries": 2, # If a task fails, it will retry 2 times.
+    }
 ) as dag:
     """
     ### Astro SDK Transform DAG
@@ -75,7 +80,35 @@ with DAG(
     """
 
     # TODO Modify here
-   
+
+
+    gen_table = aql.load_file(
+        input_file = File(path=filepaths["generation"]),
+        output_table = Table(
+            # Name of table in BigQuery; no name means temp
+            #name="output_table",
+            # Metadata object enables a consistent interface across different database backends. In this case, the specified schema corresponds to the 'dataset' concept in BigQuery
+            # metadata=Metadata(schema="sample_dataset"), 
+            # Specified connection tells the SDK both which connection to use AND what type of database system will be queried since each connection corresponds to a specific system
+            conn_id="google_cloud_default", ),
+        )
+
+    wea_table = aql.load_file(
+        input_file = File(path=filepaths["weather"]),
+        output_table = Table(
+            # Name of table in BigQuery; no name means temp
+            #name="output_table",
+            # Metadata object enables a consistent interface across different database backends. In this case, the specified schema corresponds to the 'dataset' concept in BigQuery
+            # metadata=Metadata(schema="sample_dataset"), 
+            # Specified connection tells the SDK both which connection to use AND what type of database system will be queried since each connection corresponds to a specific system
+            conn_id="google_cloud_default", ),
+        )
+
+    @aql.dataframe
+    def testy(df:DataFrame)
+        print(df.head())
+    
+    testy(wea_table)
 
     # Cleans up all temporary tables produced by the SDK
     aql.cleanup()
