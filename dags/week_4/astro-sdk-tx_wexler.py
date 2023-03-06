@@ -135,9 +135,7 @@ with DAG(
     # def testy(df:pd.DataFrame):
     #     print(df.info())
     #     print(df.head())
-    
     # testy(gen_table)
-
     # testy(gen2_table)
     # testy(wea2_table)
 
