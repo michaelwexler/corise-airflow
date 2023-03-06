@@ -32,8 +32,10 @@ def extract_nonzero_columns(input_df: pd.DataFrame) -> pd.DataFrame:
     """
 
     # TODO Modify here
-    pass
-
+    df=input_df.fillna(0)
+    new_df=df.loc[:, (df != 0).any(axis=0)]
+    #pass
+    return new_df
 
 @aql.transform
 def convert_timestamp_columns(input_table: Table, data_type: str):
@@ -43,7 +45,16 @@ def convert_timestamp_columns(input_table: Table, data_type: str):
     """
     
     # TODO Modify here
-    pass
+    # pass
+
+    # Since we are passing an additional field to parametrize the query, we need
+    # to enclose the jinja templated 'input_table' in 4 curly braces !!!!!!!!!!!!
+    # return  f"SELECT length_m * {scalar} as length_mm, * except (length_m) FROM {{{{input_table}}}}"
+
+    timestamp_column=time_columns[data_type]
+    first_part=f"SELECT CAST({timestamp_column} AS TIMESTAMP) as {timestamp_column}, * EXCEPT ({timestamp_column}) from {{{{input_table}}}}"
+    return first_part
+
 
     
 
@@ -104,12 +115,22 @@ with DAG(
             conn_id="google_cloud_default", ),
         )
 
+    gen1_table=extract_nonzero_columns(gen_table)
+    gen2_table=convert_timestamp_columns(gen1_table, "generation")
+    
+    wea1_table=extract_nonzero_columns(wea_table)
+    wea2_table=convert_timestamp_columns(wea1_table, "weather")
+
+
     @aql.dataframe
-    def testy(df:DataFrame)
+    def testy(df:pd.DataFrame):
+        print(df.info())
         print(df.head())
     
-    testy(wea_table)
+    testy(gen_table)
 
+    testy(gen2_table)
+    
     # Cleans up all temporary tables produced by the SDK
     aql.cleanup()
 
