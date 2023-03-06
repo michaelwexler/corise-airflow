@@ -65,7 +65,16 @@ def join_tables(generation_table: Table, weather_table: Table):  # skipcq: PYL-W
     """
 
     # TODO Modify here    
-    pass
+    #pass
+    # Note no need to 4 bracket the tables, since no other parameter insertions...
+    print("This is gen")
+    print (generation_table)
+    print (type(generation_table))
+    print("this is wea" )
+    print(weather_table)
+    print(type(weather_table))
+    return "select w.*, g.* from {{weather_table}} w join {{generation_table}} g on w.dt_iso=g.time"
+
 
               
 with DAG(
@@ -91,6 +100,7 @@ with DAG(
     """
 
     # TODO Modify here
+    # TODO:  once it works the long way, make a loop!  Use a for with filepath, gives the index into timecolumns too...
 
 
     gen_table = aql.load_file(
@@ -115,23 +125,33 @@ with DAG(
             conn_id="google_cloud_default", ),
         )
 
-    #If just doing dataframes, can pass around without output table, but for anything else, need to give an output
+    # Need named parameters, and need output tables!
     gen1_table=extract_nonzero_columns(input_df=gen_table, output_table=Table(conn_id="google_cloud_default",),)
     gen2_table=convert_timestamp_columns(input_table=gen1_table, data_type="generation", output_table=Table(conn_id="google_cloud_default",),)
+    wea1_table=extract_nonzero_columns(input_df=wea_table, output_table=Table(conn_id="google_cloud_default",),)
+    wea2_table=convert_timestamp_columns(input_table=wea1_table, data_type="weather", output_table=Table(conn_id="google_cloud_default",),)
     
-    #wea1_table=extract_nonzero_columns(wea_table)
-    #wea2_table=convert_timestamp_columns(wea1_table, "weather")
-
-
-    @aql.dataframe
-    def testy(df:pd.DataFrame):
-        print(df.info())
-        print(df.head())
+    # @aql.dataframe
+    # def testy(df:pd.DataFrame):
+    #     print(df.info())
+    #     print(df.head())
     
-    testy(gen_table)
+    # testy(gen_table)
 
-    testy(gen2_table)
-    
+    # testy(gen2_table)
+    # testy(wea2_table)
+
+    final_table=join_tables(
+        generation_table = gen2_table, 
+        weather_table    = wea2_table, 
+        output_table = Table(
+            conn_id = "google_cloud_default",    
+            name = "week_4_final",
+            metadata=Metadata(schema="corise_test") # not really schema, just dataset
+            )
+        )
+
+        
     # Cleans up all temporary tables produced by the SDK
     aql.cleanup()
 
