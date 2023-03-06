@@ -115,11 +115,12 @@ with DAG(
             conn_id="google_cloud_default", ),
         )
 
-    gen1_table=extract_nonzero_columns(gen_table)
-    gen2_table=convert_timestamp_columns(gen1_table, "generation")
+    #If just doing dataframes, can pass around without output table, but for anything else, need to give an output
+    gen1_table=extract_nonzero_columns(input_df=gen_table, output_table=Table(conn_id="google_cloud_default",),)
+    gen2_table=convert_timestamp_columns(input_table=gen1_table, data_type="generation", output_table=Table(conn_id="google_cloud_default",),)
     
-    wea1_table=extract_nonzero_columns(wea_table)
-    wea2_table=convert_timestamp_columns(wea1_table, "weather")
+    #wea1_table=extract_nonzero_columns(wea_table)
+    #wea2_table=convert_timestamp_columns(wea1_table, "weather")
 
 
     @aql.dataframe
